@@ -1,0 +1,327 @@
+options {
+  STATIC = false;
+}
+
+PARSER_BEGIN(Parser)
+package parser;
+
+import java.util.*;
+import java.io.*;
+import ast.*;
+import exception.*;
+
+class Parser {
+  static public void main(String[] args) {
+    for (String arg : args) {
+      try {
+        parseFile(new File(arg)).dump();
+      } catch (SyntaxException ex) {
+        System.err.println(ex.getMessage());
+      } catch (FileException ex) {
+        System.err.println(ex.getMessage());
+      } 
+    }
+  }
+
+  private String sourceName;
+
+  public Parser(Reader s, String name) {
+    this(s);
+    this.sourceName = name;
+  }
+
+  static public ExprNode parseFile(File file) throws SyntaxException, FileException{
+    return newFileParser(file).parse();
+  }
+
+  static final public String SOURCE_ENCODING = "UTF-8";
+
+  static public Parser newFileParser(File file) throws FileException {
+    try {
+      BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(file), SOURCE_ENCODING));
+      return new Parser(r, file.getPath());
+    } catch(FileNotFoundException ex) {
+      throw new FileException(ex.getMessage());
+    } catch(UnsupportedEncodingException ex) {
+      throw new Error("UTF-8 is not supprted??:" + ex.getMessage());
+    }
+  }
+
+  public ExprNode parse() throws SyntaxException {
+    try {
+      return compilation_unit();
+    } catch (TokenMgrError err) {
+      throw new SyntaxException(err.getMessage());
+    } catch (LookaheadSuccess err) {
+      throw new SyntaxException("syntax error");
+    } catch (Exception ex) {
+      throw new SyntaxException(ex.getMessage());
+    } 
+  }
+
+
+  private IntegerLiteralNode integerNode(Location loc, String image) {
+    long i = integerValue(image);
+    return new IntegerLiteralNode(loc, i);
+  }
+
+  private long integerValue(String image) {
+    String s = image.replaceFirst("[UL]+", "");
+    if (s.startsWith("0x") || s.startsWith("0X")) {
+      return Long.parseLong(s.substring(2), 16);
+    } else if (s.startsWith("0") && !s.equals("0")) {
+      return Long.parseLong(s.substring(1), 8);
+    } else {
+      return Long.parseLong(s, 10);
+    }
+  }
+
+  protected Location location(Token t) {
+    return new Location(sourceName, t);
+  }
+}
+PARSER_END(Parser)
+
+
+
+
+
+
+
+SPECIAL_TOKEN: { <SPACES: ([" ", "\t", "\n", "\r", "\f"])+> }
+SPECIAL_TOKEN: { <LINE_COMMENT: "//" (~["\n", "\r"])* ("\n" | "\r\n" | "\r")?> }
+
+TOKEN: {
+  <INTEGER: (["0"-"9"])+>
+}
+
+
+
+
+
+
+ExprNode compilation_unit(): 
+{
+  Token t;
+  ExprNode expr;
+}
+{
+  {
+    t = getToken(1);
+  }
+  expr=expr() <EOF>
+  {
+    return expr;
+  }
+}
+
+ExprNode expr():
+{
+  ExprNode lhs;
+  ExprNode rhs;
+  ExprNode expr;
+  String op;
+}
+{
+   LOOKAHEAD(term() opassign_op())
+   lhs=term() op=opassign_op() rhs=expr()
+   {
+     return new OpAssignNode(lhs, op, rhs);
+   }
+   | expr=expr10()
+   {
+     return expr;
+   }
+}
+
+String opassign_op(): {}
+{
+  ( "+=" { return "+"; }
+  | "-=" { return "-"; }
+  | "*=" { return "*"; }
+  | "/=" { return "/"; }
+  | "%=" { return "%"; }
+  | "&=" { return "&"; }
+  | "|=" { return "|"; }
+  | "^=" { return "^"; }
+  | "<<=" { return "<<"; }
+  | ">>=" { return ">>"; }
+  )
+}
+
+// expr {{{
+
+ExprNode expr10():
+{
+  ExprNode c;
+  ExprNode t;
+  ExprNode e;
+}
+{
+  c=expr9() ["?" t=expr() ":" e=expr10() { return new CondExprNode(c, t, e); } ]
+  {
+    return c;
+  }
+}
+
+ExprNode expr9():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr8() ("||" r=expr8() { l=new LogicalOrNode(l, r); } )*
+  {
+    return l;
+  }
+}
+
+ExprNode expr8():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr7() ("&&" r=expr7() { l=new LogicalAndNode(l, r); } )*
+  {
+    return l;
+  }
+}
+
+ExprNode expr7():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr6() (
+      ">" r=expr6() { l = new BinaryOpNode(l, ">", r); }
+    | "<" r=expr6() { l = new BinaryOpNode(l, "<", r); }
+    | ">=" r=expr6() { l = new BinaryOpNode(l, ">=", r); }
+    | "<=" r=expr6() { l = new BinaryOpNode(l, "<=", r); }
+    | "==" r=expr6() { l = new BinaryOpNode(l, "==", r); }
+    | "!=" r=expr6() { l = new BinaryOpNode(l, "!=", r); }
+  )*
+  {
+    return l;
+  }
+}
+
+ExprNode expr6():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr5() ("|" r=expr5() { l = new BinaryOpNode(l, "|", r); })*
+  {
+    return l;
+  }
+}
+
+ExprNode expr5():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr4() ("^" r=expr4() { l = new BinaryOpNode(l, "^", r); })*
+  {
+    return l;
+  }
+}
+
+ExprNode expr4():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr3() ("&" r=expr3() { l = new BinaryOpNode(l, "&", r); })*
+  {
+    return l;
+  }
+}
+
+ExprNode expr3():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr2() (
+      ">>" r=expr2() { l = new BinaryOpNode(l, ">>", r); }
+    | "<<" r=expr2() { l = new BinaryOpNode(l, "<<", r); }
+  )*
+  {
+    return l;
+  }
+}
+
+ExprNode expr2():
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=expr1() (
+      "+" r=expr1() { l = new BinaryOpNode(l, "+", r); }
+    | "-" r=expr1() { l = new BinaryOpNode(l, "-", r); }
+  )*
+  {
+    return l;
+  }
+}
+
+ExprNode expr1(): 
+{
+  ExprNode l;
+  ExprNode r;
+}
+{
+  l=term() (
+      "*" r=term() { l = new BinaryOpNode(l, "*", r); }
+    | "/" r=term() { l = new BinaryOpNode(l, "/", r); }
+    | "%" r=term() { l = new BinaryOpNode(l, "%", r); }
+  )*
+  {
+    return l;
+  }
+}
+
+
+// }}}
+
+// term {{{
+
+ExprNode term(): 
+{
+  ExprNode n;
+}
+{
+  n=primary()
+  {
+    return n;
+  }
+}
+
+ExprNode primary(): 
+{
+  Token t;
+  ExprNode n;
+}
+{
+  t=<INTEGER>
+  {
+    return integerNode(location(t), t.image);
+  }
+  | "(" n=expr() ")"
+  {
+    return n;
+  }
+}
+
+// }}}
+
+
+

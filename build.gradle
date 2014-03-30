@@ -1,0 +1,40 @@
+apply plugin: 'java'
+
+def defaultEncoding = 'UTF-8'
+
+repositories {
+  mavenCentral()
+}
+
+[compileJava,compileTestJava].each{it.options.encoding = defaultEncoding}
+
+task rmDir(type: Delete) {
+  delete "src/main/java"
+}
+
+task copyJava(type:Copy, dependsOn: rmDir) {
+  from('src/main/javacc') {
+    include '**/*.java'
+  }
+  into 'src/main/java'
+}
+
+task javacc(type:Exec, dependsOn: copyJava) {
+  ext.srcFile = file("src/main/javacc/parser/Parser.jj")
+  ext.destDir = file("src/main/java/parser")
+
+  destDir.mkdirs()
+  commandLine 'javacc', "-OUTPUT_DIRECTORY=$destDir", "$srcFile"
+}
+
+compileJava.dependsOn javacc
+
+task cbc(type: JavaExec){
+  group = "Run"
+  description = "Run the cbc program"
+  main = "parser.Parser"
+  classpath sourceSets.main.output + sourceSets.main.runtimeClasspath
+  if (project.hasProperty('args')) {
+    args project.args
+  }
+}
